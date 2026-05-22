@@ -1,6 +1,7 @@
 import Container from "@/app/Components/Container";
 import Banner from "@/components/ui/banner";
 import CollectionsClient from "./CollectionsClient";
+import { prisma } from "@/lib/prisma";
 
 // Disable static generation (for SSR)
 export const dynamic = "force-dynamic";
@@ -34,8 +35,6 @@ type Filters = {
 };
 
 export default async function CollectionsPage() {
-  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
-
   let products: Product[] = [];
   let filters: Filters = {
     male: { ageGroups: [], subCategories: [] },
@@ -43,38 +42,76 @@ export default async function CollectionsPage() {
   };
 
   try {
-    console.log("🔍 Fetching data from:", baseUrl);
+    console.log("🔍 Loading products directly from database via Prisma...");
 
-    const [productRes, filterRes] = await Promise.all([
-      fetch(`${baseUrl}/api/products`, { cache: "no-store" }),
-      fetch(`${baseUrl}/api/products/filters`, { cache: "no-store" }),
+    const [rawProducts, rawFilterData] = await Promise.all([
+      prisma.product.findMany({
+        where: { isActive: true },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.product.findMany({
+        where: { isActive: true },
+        select: {
+          category: true,
+          ageGroup: true,
+          subCategory: true,
+        },
+      }),
     ]);
 
-    if (!productRes.ok) {
-      console.error("❌ Products API failed:", productRes.statusText);
-    } else {
-      const data = await productRes.json();
-      if (Array.isArray(data)) {
-        products = data;
-        console.log(`✅ Loaded ${products.length} products`);
-      } else {
-        console.warn("⚠️ Unexpected products format");
+    // Format products from Prisma schema types to page component props
+    products = rawProducts.map((p) => ({
+      id: p.id,
+      name: p.name,
+      category: p.category as "male" | "female",
+      subCategory: p.subCategory,
+      ageGroup: p.ageGroup,
+      price: Number(p.price),
+      isNew: p.isNew,
+      isFeatured: p.isFeatured,
+      image: p.image,
+      hoverImage: p.hoverImage || undefined,
+      description: p.description || undefined,
+    }));
+
+    // Process filters
+    const filterSets = {
+      male: {
+        ageGroups: new Set<string>(),
+        subCategories: new Set<string>(),
+      },
+      female: {
+        ageGroups: new Set<string>(),
+        subCategories: new Set<string>(),
+      },
+    };
+
+    for (const item of rawFilterData) {
+      const { category, ageGroup, subCategory } = item;
+      if (
+        (category === "male" || category === "female") &&
+        ageGroup &&
+        subCategory
+      ) {
+        filterSets[category].ageGroups.add(ageGroup);
+        filterSets[category].subCategories.add(subCategory);
       }
     }
 
-    if (!filterRes.ok) {
-      console.error("❌ Filters API failed:", filterRes.statusText);
-    } else {
-      const data = await filterRes.json();
-      if (data?.male && data?.female) {
-        filters = data;
-        console.log("✅ Loaded filters successfully");
-      } else {
-        console.warn("⚠️ Unexpected filters format");
-      }
-    }
+    filters = {
+      male: {
+        ageGroups: Array.from(filterSets.male.ageGroups),
+        subCategories: Array.from(filterSets.male.subCategories),
+      },
+      female: {
+        ageGroups: Array.from(filterSets.female.ageGroups),
+        subCategories: Array.from(filterSets.female.subCategories),
+      },
+    };
+
+    console.log(`✅ Loaded ${products.length} active products and filters successfully`);
   } catch (error) {
-    console.error("❌ Error fetching products or filters:", error);
+    console.error("❌ Error loading products or filters from database:", error);
   }
 
   return (
