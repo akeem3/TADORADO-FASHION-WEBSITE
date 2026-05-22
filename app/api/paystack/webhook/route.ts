@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import crypto from "crypto";
 import { PAYSTACK_CONFIG, parseAmount } from "@/lib/paystack";
 import { createAdminOrderNotificationEmail, sendEmail } from "@/lib/email";
@@ -101,85 +101,100 @@ export async function POST(request: NextRequest) {
       parts[3] || "",
     ];
 
-    // Send admin email immediately (server-side guarantee)
-    const adminEmail = createAdminOrderNotificationEmail({
-      customerName: customerName,
-      customerEmail: customerEmail,
-      customerPhone: customerPhone,
-      orderReference: reference,
-      totalAmount: amount,
-      orderItems: orderItemsStr,
-      measurements: measurementsStr,
-      deliveryAddress:
-        deliveryAddressStr ||
-        [address, city, state, country].filter(Boolean).join(", "),
-      paymentStatus: "success",
+    after(async () => {
+      try {
+        // Send admin email immediately (server-side guarantee)
+        const adminEmail = createAdminOrderNotificationEmail({
+          customerName: customerName,
+          customerEmail: customerEmail,
+          customerPhone: customerPhone,
+          orderReference: reference,
+          totalAmount: amount,
+          orderItems: orderItemsStr,
+          measurements: measurementsStr,
+          deliveryAddress:
+            deliveryAddressStr ||
+            [address, city, state, country].filter(Boolean).join(", "),
+          paymentStatus: "success",
+        });
+
+        // Fire-and-forget email (do not fail webhook if email fails)
+        try {
+          await sendEmail(adminEmail);
+        } catch (emailError) {
+          console.error("Webhook background: email sending error:", emailError);
+        }
+
+        // Prepare minimal cartItems from orderItemsStr for Google Sheets export
+        const cartItems = orderItemsStr
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .map((entry, idx) => {
+            // Parse "Name (Nx)" pattern
+            const match = entry.match(/^(.*)\s*\((\d+)x\)$/i);
+            const name = match ? match[1].trim() : entry;
+            const quantity = match ? parseInt(match[2], 10) : 1;
+            return {
+              id: idx + 1,
+              name,
+              category: "",
+              subCategory: "",
+              price: 0,
+              quantity,
+              image: "",
+            };
+          });
+
+        // Export order to Google Sheets using existing orders API
+        const host = request.headers.get("host");
+        const protocol = process.env.NODE_ENV === "production" ? "https" : "http";
+        const baseUrl = host
+          ? `${protocol}://${host}`
+          : process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+        
+        try {
+          const ordersRes = await fetch(`${baseUrl}/api/orders`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              customerInfo: {
+                fullName: customerName,
+                email: customerEmail,
+                phone: customerPhone,
+                address,
+                city,
+                state,
+                country,
+                postalCode: "",
+                deliverySpeed: "standard",
+              },
+              measurements: [], // measurements already included in notes and admin email
+              paymentInfo: {
+                method: "paystack",
+                status: "success",
+                reference,
+                transactionId: String(tx.id || ""),
+              },
+              cartItems,
+              totalAmount: amount,
+              shippingCost: 0,
+              taxAmount: 0,
+              notes: measurementsStr || "",
+              paymentReference: reference,
+            }),
+          });
+
+          if (!ordersRes.ok) {
+            console.error("Webhook background: failed to export order to Google Sheets");
+          }
+        } catch (sheetsError) {
+          console.error("Webhook background: sheets export error:", sheetsError);
+        }
+      } catch (backgroundError) {
+        console.error("Webhook background error:", backgroundError);
+      }
     });
-
-    // Fire-and-forget email (do not fail webhook if email fails)
-    await sendEmail(adminEmail);
-
-    // Prepare minimal cartItems from orderItemsStr for Google Sheets export
-    const cartItems = orderItemsStr
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map((entry, idx) => {
-        // Parse "Name (Nx)" pattern
-        const match = entry.match(/^(.*)\s*\((\d+)x\)$/i);
-        const name = match ? match[1].trim() : entry;
-        const quantity = match ? parseInt(match[2], 10) : 1;
-        return {
-          id: idx + 1,
-          name,
-          category: "",
-          subCategory: "",
-          price: 0,
-          quantity,
-          image: "",
-        };
-      });
-
-    // Export order to Google Sheets using existing orders API
-    const host = request.headers.get("host");
-    const protocol = process.env.NODE_ENV === "production" ? "https" : "http";
-    const baseUrl = host
-      ? `${protocol}://${host}`
-      : process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
-    const ordersRes = await fetch(`${baseUrl}/api/orders`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        customerInfo: {
-          fullName: customerName,
-          email: customerEmail,
-          phone: customerPhone,
-          address,
-          city,
-          state,
-          country,
-          postalCode: "",
-          deliverySpeed: "standard",
-        },
-        measurements: [], // measurements already included in notes and admin email
-        paymentInfo: {
-          method: "paystack",
-          status: "success",
-          reference,
-          transactionId: String(tx.id || ""),
-        },
-        cartItems,
-        totalAmount: amount,
-        shippingCost: 0,
-        taxAmount: 0,
-        notes: measurementsStr || "",
-        paymentReference: reference,
-      }),
-    });
-
-    if (!ordersRes.ok) {
-      console.error("Webhook: failed to export order to Google Sheets");
-    }
 
     return NextResponse.json({ success: true, message: "Webhook processed" });
   } catch (error) {

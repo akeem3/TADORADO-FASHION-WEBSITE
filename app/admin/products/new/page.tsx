@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import Container from "@/app/Components/Container";
+import ImageUpload from "@/components/admin/ImageUpload";
 import type { Product } from "@/data/products";
 import { maleCategories, femaleCategories } from "@/data/products";
 
@@ -174,6 +175,7 @@ export default function NewProductPage() {
               ))}
             </select>
           </div>
+
           <div>
             <label
               className="block mb-1 font-medium text-[#46332E]"
@@ -194,39 +196,19 @@ export default function NewProductPage() {
               step="0.01"
             />
           </div>
-          <div>
-            <label
-              className="block mb-1 font-medium text-[#46332E]"
-              htmlFor="image"
-            >
-              Product Image URL
-            </label>
-            <input
-              id="image"
-              name="image"
-              placeholder="Enter image URL"
-              value={form.image || ""}
-              onChange={handleChange}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#46332E] focus:border-transparent"
-              required
-            />
-          </div>
-          <div>
-            <label
-              className="block mb-1 font-medium text-[#46332E]"
-              htmlFor="hoverImage"
-            >
-              Hover Image URL (Optional)
-            </label>
-            <input
-              id="hoverImage"
-              name="hoverImage"
-              placeholder="Enter hover image URL"
-              value={form.hoverImage || ""}
-              onChange={handleChange}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#46332E] focus:border-transparent"
-            />
-          </div>
+
+          <ImageUpload
+            label="Product Image"
+            onUploadSuccess={(url) => setForm((prev) => ({ ...prev, image: url }))}
+            currentImage={form.image}
+          />
+
+          <ImageUpload
+            label="Hover Image (Optional)"
+            onUploadSuccess={(url) => setForm((prev) => ({ ...prev, hoverImage: url }))}
+            currentImage={form.hoverImage}
+          />
+
           <div>
             <label
               className="block mb-1 font-medium text-[#46332E]"

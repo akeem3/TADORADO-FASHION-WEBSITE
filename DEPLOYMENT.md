@@ -1,142 +1,81 @@
-# 🚀 Render Deployment Guide for Tadorado Fashion
+# 🚀 Vercel Deployment Guide for Tadorado Fashion
+
+This guide outlines how to deploy the Tadorado Fashion Next.js 15 application to Vercel. The project has been optimized to handle serverless execution limits, prevent database connection pools from being exhausted, and run third-party integrations asynchronously after response delivery.
+
+---
 
 ## Prerequisites
 
-- GitHub repository with your code
-- Render account
-- **Existing Aiven MySQL database** (already set up)
-- Google Cloud service account (for Google Sheets integration)
-- Firebase project (if using Firebase Storage)
+- **GitHub Repository** containing the codebase.
+- **Vercel Account** connected to your GitHub account.
+- **Supabase Database Instance** (PostgreSQL) with tables set up.
+- **Google Cloud Service Account** (JSON credentials) for Google Sheets access.
+- **Paystack Merchant Account** for handling checkouts.
+
+---
 
 ## Step-by-Step Deployment
 
-### 1. Web Service Setup (No Database Setup Needed!)
+### 1. Link to Vercel
 
-1. **Create Web Service:**
+1. Log into your [Vercel Dashboard](https://vercel.com).
+2. Click **Add New** → **Project**.
+3. Import your GitHub repository.
+4. Select **Next.js** as the Framework Preset (Vercel will detect it automatically).
 
-   - Go to [render.com](https://render.com)
-   - Click "New" → "Web Service"
-   - Connect your GitHub repository
-   - Choose the repository branch (usually `main`)
+### 2. Configure Environment Variables
 
-2. **Configure Build Settings:**
-   - **Build Command:** `npm install && npx prisma generate && npm run build`
-   - **Start Command:** `npm start`
-   - **Environment:** `Node`
+Under the **Environment Variables** section in Vercel, copy and set the following configuration values:
 
-### 2. Environment Variables
+#### Database Settings
 
-Add these environment variables in Render dashboard:
+| Key | Value Description | Example / Notes |
+| :--- | :--- | :--- |
+| `DATABASE_URL` | Transaction Connection Pooler URL with pool limit | Must append `&connection_limit=1` to prevent database connection exhaustion. Example: `postgresql://postgres.xxx:xxx@aws-0-eu-west-1.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1` |
+| `DIRECT_URL` | Direct database connection string (port 5432) | Used by Prisma for schema push. Example: `postgresql://postgres.xxx:xxx@aws-0-eu-west-1.pooler.supabase.com:5432/postgres` |
 
-#### Required Variables:
+#### Google Sheets API Integration
 
-```
-DATABASE_URL=mysql://your_aiven_username:your_aiven_password@your_aiven_host:your_aiven_port/your_aiven_database
-GOOGLE_SERVICE_ACCOUNT={"type":"service_account",...}
-GOOGLE_SHEET_ID=your_sheet_id
-GOOGLE_SHEET_FILENAME=Tadorado
-NODE_ENV=production
-```
+| Key | Value Description | Example / Notes |
+| :--- | :--- | :--- |
+| `GOOGLE_SERVICE_ACCOUNT` | Raw Google Cloud Service Account JSON credentials | Copy-paste the entire contents of the `.json` key file as-is. |
+| `GOOGLE_SHEET_ID` | The spreadsheet unique ID | Extract from the URL. e.g., `1aBCdeFgHijKlMnOpQrStUvWxYz` |
+| `GOOGLE_SHEET_FILENAME` | Tab/Sheet title to record orders | Default: `Tadorado` |
 
-#### Optional (if using Firebase):
+#### Paystack Integration
 
-```
-NEXT_PUBLIC_FIREBASE_API_KEY=your_key
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your_domain
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your_bucket
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
-NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id
-```
+| Key | Value Description | Example / Notes |
+| :--- | :--- | :--- |
+| `NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY` | Paystack Public API Key | `pk_live_...` or `pk_test_...` |
+| `PAYSTACK_SECRET_KEY` | Paystack Secret API Key | `sk_live_...` or `sk_test_...` |
 
-#### Node.js Compatibility:
+#### Email Notifications (SMTP)
 
-```
-NODE_OPTIONS=--openssl-legacy-provider
-```
+| Key | Value Description | Example / Notes |
+| :--- | :--- | :--- |
+| `SMTP_HOST` | Hostname of SMTP mail server | e.g., `smtp.gmail.com` |
+| `SMTP_PORT` | Port of SMTP mail server | `465` (SSL) or `587` (TLS) |
+| `SMTP_USER` | Email username | `your-email@gmail.com` |
+| `SMTP_PASSWORD` | App-specific email password | Use app password if using Gmail 2FA |
+| `SMTP_FROM` | Sender address | `"Tadorado Fashion" <your-email@gmail.com>` |
+| `SMTP_TO` | Notification recipient address | `recipient-email@gmail.com` |
 
-### 3. Deploy
+---
 
-1. Click "Create Web Service"
-2. Render will automatically build and deploy your application
-3. Monitor the build logs for any errors
+## Serverless Optimization Architecture
 
-## Important Notes
+To prevent timeout limits (e.g., Vercel Hobby tier has a **10-second request timeout** limit), the codebase uses Next.js 15 `after()`:
 
-### Database Connection
+- **Instant Checkouts:** Upon verifying a Paystack charge or validating a process order request, the endpoint returns an immediate success response to the client.
+- **Asynchronous Execution:** SMTP email notifications and Google Sheets order appends run in the background after the response is delivered. This guarantees checkouts never timeout on Vercel.
 
-- **Keep your existing Aiven database** - no changes needed
-- Just copy your current `DATABASE_URL` from your local `.env` file
-- Make sure Aiven allows connections from Render's IP ranges
+---
 
-### Google Sheets Integration
+## Verification and Monitoring
 
-- **No changes needed** - your existing setup will work
-- Just copy your current Google service account and sheet configuration
-
-## Troubleshooting
-
-### Common Issues:
-
-1. **Build Fails:**
-
-   - Check if all dependencies are in `package.json`
-   - Ensure Prisma schema is valid
-   - Verify environment variables are set correctly
-
-2. **Database Connection Issues:**
-
-   - Verify your Aiven `DATABASE_URL` is correct
-   - Check if Aiven allows external connections
-   - Ensure your Aiven database is accessible from Render
-
-3. **Google Sheets Integration Fails:**
-
-   - Verify service account JSON is properly formatted
-   - Check if Google Sheet is shared with service account
-   - Ensure sheet ID is correct
-
-4. **Node.js Version Issues:**
-   - Add `NODE_OPTIONS=--openssl-legacy-provider` to environment variables
-   - Or specify Node.js version in `package.json`
-
-### Health Check:
-
-- Render will automatically check `/` endpoint
-- Ensure your homepage loads without errors
-- Check application logs in Render dashboard
-
-## Post-Deployment
-
-1. **Test the Application:**
-
-   - Visit your Render URL
-   - Test product browsing
-   - Test checkout flow
-   - Verify Google Sheets export
-
-2. **Monitor Logs:**
-
-   - Check Render logs for any errors
-   - Monitor database connections
-   - Verify API endpoints are working
-
-3. **Custom Domain (Optional):**
-   - Add custom domain in Render settings
-   - Update DNS records
-   - Configure SSL certificate
-
-## Support
-
-If you encounter issues:
-
-1. Check Render logs first
-2. Verify all environment variables
-3. Test locally with production environment
-4. Contact Render support if needed
-
-## Cost Optimization
-
-- Render offers free tier for development
-- Consider upgrading for production traffic
-- Monitor usage and optimize accordingly
+1. **Prisma Generation:**
+   Vercel will run the `prisma generate` step automatically during installation via the `postinstall` script defined in `package.json`.
+2. **Build Compilation:**
+   Vercel compiles the static pages and API routes automatically. TypeScript checks are strict, but build-breaking warnings have been resolved.
+3. **Log Checking:**
+   If a customer checkouts successfully but the email or spreadsheet row is missing, check the **Vercel Logs** tab under the API endpoints. Since emails and Sheets run inside the `after()` block, errors will be printed to Vercel stdout/stderr without failing the request.

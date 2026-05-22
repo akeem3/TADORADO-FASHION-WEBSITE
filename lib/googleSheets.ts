@@ -10,34 +10,33 @@ function extractSheetId(id: string): string {
   return id;
 }
 
-const serviceAccountRaw =
-  process.env.GOOGLE_SERVICE_ACCOUNT ||
-  process.env.GOOGLE_SERVICE_ACCOUNT_JSON ||
-  "{}";
-const serviceAccount = JSON.parse(serviceAccountRaw);
+interface GoogleServiceAccount {
+  client_email?: string;
+  private_key?: string;
+}
+
+let serviceAccount: GoogleServiceAccount = {};
+try {
+  serviceAccount = JSON.parse(
+    process.env.GOOGLE_SERVICE_ACCOUNT ||
+    process.env.GOOGLE_SERVICE_ACCOUNT_JSON ||
+    "{}"
+  );
+} catch {
+  console.warn("Google Sheets API: Failed to parse GOOGLE_SERVICE_ACCOUNT env var.");
+}
+
 const rawSheetId = process.env.GOOGLE_SHEET_ID || "";
 const sheetId = extractSheetId(rawSheetId);
 const sheetName = process.env.GOOGLE_SHEET_FILENAME || "Tadorado";
 
-if (!serviceAccount || !sheetId) {
-  throw new Error(
-    "Google Sheets credentials or Sheet ID missing in environment variables."
-  );
-}
-
-// Log which spreadsheet and service account are being used
-console.log(`Google Sheets API: Using spreadsheet ID: ${sheetId}`);
-console.log(
-  `Google Sheets API: Using service account: ${serviceAccount.client_email}`
-);
-
 // Fix: Convert literal \n or \r\n to real newlines in the private key
-const fixedPrivateKey = serviceAccount.private_key
+const fixedPrivateKey = serviceAccount?.private_key
   ? serviceAccount.private_key.replace(/\\n/g, "\n").replace(/\r\n/g, "\n")
   : undefined;
 
 const auth = new google.auth.JWT({
-  email: serviceAccount.client_email,
+  email: serviceAccount?.client_email,
   key: fixedPrivateKey,
   scopes: [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -50,6 +49,10 @@ const drive = google.drive({ version: "v3", auth });
 
 // Debug: List all sheet/tab names in the spreadsheet
 export async function logSheetTabNames() {
+  if (!serviceAccount?.client_email || !sheetId) {
+    console.warn("Google Sheets API: Credentials or Sheet ID missing. Skipping logSheetTabNames.");
+    return [];
+  }
   try {
     const res = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
     const tabs = res.data.sheets?.map((s) => s.properties?.title) || [];
@@ -63,6 +66,10 @@ export async function logSheetTabNames() {
 
 // Debug: Log Drive file info as seen by the service account
 export async function logDriveFileInfo() {
+  if (!serviceAccount?.client_email || !sheetId) {
+    console.warn("Google Sheets API: Credentials or Sheet ID missing. Skipping logDriveFileInfo.");
+    return null;
+  }
   try {
     const res = await drive.files.get({
       fileId: sheetId,
@@ -76,11 +83,23 @@ export async function logDriveFileInfo() {
   }
 }
 
-// Call the debug functions at startup
-logSheetTabNames();
-logDriveFileInfo();
+// Call the debug functions at startup only in development
+if (process.env.NODE_ENV === "development" && serviceAccount?.client_email && sheetId) {
+  console.log(`Google Sheets API: Using spreadsheet ID: ${sheetId}`);
+  console.log(
+    `Google Sheets API: Using service account: ${serviceAccount.client_email}`
+  );
+  logSheetTabNames();
+  logDriveFileInfo();
+}
 
 export async function appendOrderToSheet(orderData: Record<string, unknown>) {
+  if (!serviceAccount?.client_email || !sheetId) {
+    return {
+      success: false,
+      error: "Google Sheets credentials or Sheet ID missing in environment variables.",
+    };
+  }
   try {
     // Format measurements as multi-line string
     let measurementsFormatted = "";
