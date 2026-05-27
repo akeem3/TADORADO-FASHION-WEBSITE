@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Loader2, Upload, X } from "lucide-react";
 import Image from "next/image";
@@ -29,28 +28,22 @@ export default function ImageUpload({
       }
 
       const file = e.target.files[0];
-      const fileExt = file.name.split(".").pop();
-      const fileName = `${Math.random().toString(36).substring(2)}-${Date.now()}.${fileExt}`;
-      const filePath = `products/${fileName}`;
+      const formData = new FormData();
+      formData.append("file", file);
 
-      // Upload the file to Supabase Storage
-      const { error: uploadError } = await supabase.storage
-        .from("tadorado-assets")
-        .upload(filePath, file);
+      const res = await fetch("/api/admin/upload", {
+        method: "POST",
+        body: formData,
+      });
 
-      if (uploadError) {
-        throw uploadError;
+      const result = await res.json();
+
+      if (!res.ok) {
+        throw new Error(result.error || "Upload failed");
       }
 
-      // Get the public URL
-      const { data } = supabase.storage
-        .from("tadorado-assets")
-        .getPublicUrl(filePath);
-
-      if (data) {
-        setPreview(data.publicUrl);
-        onUploadSuccess(data.publicUrl);
-      }
+      setPreview(result.url);
+      onUploadSuccess(result.url);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
       alert("Error uploading image: " + errorMessage);
